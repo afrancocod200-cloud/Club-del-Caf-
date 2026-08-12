@@ -42,3 +42,5 @@ yarn-error.log*
 
 node_modules
 *.tar.gz
+
+.env*

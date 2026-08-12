@@ -1,7 +1,6 @@
-import vinext from "vinext";
 import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 import hostingConfig from "./.openai/hosting.json";
-import { sites } from "./build/sites-vite-plugin";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
@@ -33,15 +32,23 @@ const localBindingConfig = {
     : [],
 };
 
-export default defineConfig(async () => {
+export default defineConfig(async ({ command }) => {
+  // Vercel serves the public app as a static SPA.
+  if (command === "build" && process.env.VINEXT_BUILD !== "true") {
+    return { plugins: [react()] };
+  }
+
+  const [{ default: vinext }, { sites }, { cloudflare }] = await Promise.all([
+    import("vinext"),
+    import("./build/sites-vite-plugin"),
+    import("@cloudflare/vite-plugin"),
+  ]);
+
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
   process.env.WRANGLER_LOG_PATH ??= ".wrangler/logs";
   process.env.MINIFLARE_REGISTRY_PATH ??= ".wrangler/registry";
-
-  // Wrangler snapshots its log path while the Cloudflare plugin is imported.
-  const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
     server: isCodexSeatbeltSandbox
