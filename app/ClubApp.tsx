@@ -12,6 +12,23 @@ import {
   type ProducerRecord,
   type ProductRecord,
 } from "./services/clubData";
+import { getInitialAdminSession, isAdminAuthConfigured, onAdminAuthChange, signInAdmin, signOutAdmin } from "./lib/adminAuth";
+import {
+  createEvent,
+  createMembership,
+  createProducer,
+  createProduct,
+  deleteEvent,
+  deleteMembership,
+  deleteProducer,
+  deleteProduct,
+  getReservations,
+  updateEvent,
+  updateMembership,
+  updateProducer,
+  updateProduct,
+  type ReservationRecord,
+} from "./services/adminData";
 
 type Product = { slug:string; name:string; category:string; maker:string; price:number; member:number; image:string; tag?:string; stock?:string; region?:string; process?:string; notes?:string };
 type Event = { id:string; slug:string; name:string; type:string; date:string; time:string; price:number; member:number; seats:number; image:string; featured?:boolean };
@@ -137,8 +154,92 @@ function Reservations(){return <><p className="eyebrow">MI AGENDA</p><h1>Mis res
 function MonthCoffee(){return <><p className="eyebrow">AGOSTO · EDICIÓN 08</p><h1>Huila <em>Lavado</em></h1><div className="month-layout"><img src={images.huila} alt="Huila lavado"/><div><h2>Una historia de altura y paciencia.</h2><p>Desde Pitalito llega una taza luminosa de Luz Marina y su familia. Panela, mandarina y cacao en un café hecho para las mañanas sin prisa.</p><div className="specs"><span><b>Región</b>Pitalito, Huila</span><span><b>Receta</b>V60 · 15 g / 250 ml</span></div><Link to="/marketplace/huila-lavado" className="btn primary">Comprar otra bolsa</Link></div></div></>}
 function Profile(){return <><p className="eyebrow">TU INFORMACIÓN</p><h1>Perfil</h1><form className="profile-form"><div className="two"><label>Nombre<input defaultValue="Ana"/></label><label>Apellido<input defaultValue="Gómez"/></label></div><label>Correo<input defaultValue="ana@ejemplo.com"/></label><label>Celular<input defaultValue="300 555 0101"/></label><label>Preferencia de café<select><option>Balanceado y dulce</option><option>Frutal y brillante</option></select></label><button className="btn primary">Guardar cambios</button></form></>}
 
-function Admin({sub="home"}:{sub?:string}){const [items,setItems]=useState(products);const names:{[k:string]:string}={home:"Dashboard",productos:"Productos",eventos:"Eventos",productores:"Productores",miembros:"Miembros",reservas:"Reservas",pedidos:"Pedidos",configuracion:"Configuración"};return <main className="portal admin"><aside><Link to="/" className="brand light"><span className="brandmark">C</span><span>CLUB DEL CAFÉ<small>ADMIN</small></span></Link><nav>{Object.entries(names).map(([s,n])=><Link key={s} to={`/admin${s==='home'?'':`/${s}`}`} className={sub===s?"active":""}>{n}</Link>)}</nav><Link to="/">Volver al sitio</Link></aside><div className="portal-content"><p className="eyebrow">ADMINISTRACIÓN</p><div className="admin-head"><h1>{names[sub]||"Dashboard"}</h1>{sub!=="home"&&<button className="btn primary" onClick={()=>sub==="productos"&&setItems([{...products[0],slug:`nuevo-${items.length}`,name:"Nuevo producto",tag:"Borrador"},...items])}>+ Crear nuevo</button>}</div>{sub==="home"?<Dashboard/>:<AdminTable type={sub} items={items} setItems={setItems}/>}</div></main>}
-function Dashboard(){return <><p className="lead">Buenos días. Esto está pasando hoy en el Club.</p><div className="stats"><div><small>MIEMBROS ACTIVOS</small><b>284</b><span>+12 este mes</span></div><div><small>EVENTOS PRÓXIMOS</small><b>5</b><span>54 reservas</span></div><div><small>RESERVAS PENDIENTES</small><b>7</b><span>Requieren atención</span></div><div><small>PEDIDOS ABIERTOS</small><b>12</b><span>4 listos</span></div></div><div className="admin-grid"><section><h2>Próximos eventos</h2>{events.slice(0,3).map(e=><div className="mini-row" key={e.slug}><span className="mini-date">{e.date}</span><b>{e.name}</b><small>{e.seats} cupos</small></div>)}</section><section><h2>Acciones rápidas</h2><div className="quick"><Link to="/admin/productos">+ Producto</Link><Link to="/admin/eventos">+ Evento</Link><Link to="/admin/productores">+ Productor</Link><Link to="/admin/miembros">Ver miembros</Link></div></section></div></>}
-function AdminTable({type,items,setItems}:{type:string;items:Product[];setItems:(p:Product[])=>void}){const data=type==="productos"?items:type==="eventos"?events:type==="productores"?producers:type==="miembros"?[{name:"Ana Gómez",category:"Catador",maker:"Activa"},{name:"Carlos Ruiz",category:"Explorador",maker:"Activa"},{name:"Laura Díaz",category:"Ritual",maker:"Pendiente"}]:type==="reservas"?events.slice(0,4).map(e=>({name:e.name,category:e.date,maker:"Confirmada"})):type==="pedidos"?products.slice(0,4).map(p=>({name:p.name,category:"Solicitud WhatsApp",maker:"Pendiente"})):[{name:"Número de WhatsApp",category:"Contacto",maker:"+57 300 123 4567"}];return <div className="admin-table"><div className="table-tools"><input placeholder="Buscar…"/><select><option>Todos los estados</option></select></div>{data.map((x:any,i:number)=><div className="table-row" key={(x.slug||x.name)+i}>{x.image?<img src={x.image} alt=""/>:<span className="avatar">{x.name[0]}</span>}<span><b>{x.name}</b><small>{x.category||x.region}</small></span><span className="status">● {x.stock||x.maker||"Activo"}</span><button onClick={()=>type==="productos"&&setItems(items.filter(p=>p.slug!==x.slug))}>•••</button></div>)}</div>}
+type AdminSession = { email: string } | null;
 
-export default function ClubApp(){const [path,setPath]=useState("/");const [logged,setLogged]=useState(false);const [clubData,setClubData]=useState<ClubData>({products,events,producers,plans});useEffect(()=>{const sync=()=>setPath(location.pathname);sync();addEventListener("popstate",sync);return()=>removeEventListener("popstate",sync)},[]);useEffect(()=>{let active=true;Promise.all([getProducts(),getEvents(),getProducers(),getMemberships()]).then(([productRows,eventRows,producerRows,membershipRows])=>{if(active)setClubData({products:mapProducts(productRows),events:mapEvents(eventRows),producers:mapProducers(producerRows),plans:mapPlans(membershipRows)})}).catch(error=>console.warn("[Club del Café] No fue posible actualizar los datos; continúan activos los mocks.",error));return()=>{active=false}},[]);const parts=useMemo(()=>path.split("/").filter(Boolean),[path]);let content:React.ReactNode;if(path==="/")content=<Home/>;else if(parts[0]==="marketplace")content=parts[1]?<ProductDetail slug={parts[1]}/>:<Marketplace/>;else if(parts[0]==="calendario")content=parts[1]?<EventDetail slug={parts[1]}/>:<Calendar/>;else if(parts[0]==="productores")content=parts[1]?<ProducerDetail slug={parts[1]}/>:<Producers/>;else if(path==="/membresias")content=<Memberships/>;else if(path==="/sede")content=<Venue/>;else if(path==="/login")content=<Auth kind="login" setLogged={setLogged}/>;else if(path==="/registro")content=<Auth kind="register" setLogged={setLogged}/>;else if(parts[0]==="mi-club")content=<Member sub={parts[1]||"home"} setLogged={setLogged}/>;else if(parts[0]==="admin")content=<Admin sub={parts[1]||"home"}/>;else content=<Home/>;const portal=parts[0]==="mi-club"||parts[0]==="admin";return <ClubDataContext.Provider value={clubData}><>{!portal&&<Header logged={logged} setLogged={setLogged}/>} {content} {!portal&&<Footer/>}<a className="wa-float" href={whatsapp("Hola, quiero más información sobre Club del Café.")} target="_blank" aria-label="WhatsApp">◉</a></></ClubDataContext.Provider>}
+function AdminLogin({onSignedIn}:{onSignedIn:()=>void}){
+ const [email,setEmail]=useState("");
+ const [password,setPassword]=useState("");
+ const [error,setError]=useState<string|null>(null);
+ const [loading,setLoading]=useState(false);
+ async function submit(e:FormEvent){e.preventDefault();setError(null);setLoading(true);const {error:signInError}=await signInAdmin(email,password);setLoading(false);if(signInError){setError(signInError);return}onSignedIn()}
+ return <main className="auth-page admin-login"><div className="auth-photo"><img src="https://images.unsplash.com/photo-1442512595331-e89e73853f31?auto=format&fit=crop&w=1200&q=85" alt="Sede del Club del Café"/><blockquote>&ldquo;Cada mes, un café.<br/>Cada café, una historia.&rdquo;</blockquote></div><form className="auth-form" onSubmit={submit}><p className="eyebrow">PANEL INTERNO</p><h1>Administración<br/>del Club.</h1><p>Ingresa con la cuenta que se creó para ti en Supabase.</p><label>Correo electrónico<input type="email" required value={email} onChange={ev=>setEmail(ev.target.value)} autoComplete="email"/></label><label>Contraseña<input type="password" required value={password} onChange={ev=>setPassword(ev.target.value)} autoComplete="current-password"/></label>{error&&<p className="admin-login-error">{error}</p>}{!isAdminAuthConfigured&&<p className="admin-login-error">Falta configurar Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).</p>}<button className="btn primary" type="submit" disabled={loading}>{loading?"Ingresando…":"Ingresar al panel"}</button></form></main>
+}
+
+type FieldDef={key:string;label:string;type?:"text"|"number"};
+
+function normalizeNumbers(values:Record<string,string>,numericKeys:string[]):Record<string,unknown>{
+ const out:Record<string,unknown>={...values};
+ numericKeys.forEach(k=>{if(out[k]!==undefined&&out[k]!==""){out[k]=Number(out[k])}else{delete out[k]}});
+ return out;
+}
+
+function CrudPanel<T extends {id:string}>({title,hint,fields,load,onCreate,onUpdate,onDelete}:{title:string;hint?:string;fields:FieldDef[];load:()=>Promise<T[]>;onCreate:(values:Record<string,string>)=>Promise<{error:string|null}>;onUpdate:(id:string,values:Record<string,string>)=>Promise<{error:string|null}>;onDelete:(id:string)=>Promise<{error:string|null}>}){
+ const [rows,setRows]=useState<T[]>([]);
+ const [loading,setLoading]=useState(true);
+ const [error,setError]=useState<string|null>(null);
+ const [creating,setCreating]=useState(false);
+ const [draft,setDraft]=useState<Record<string,string>>({});
+ const [editingId,setEditingId]=useState<string|null>(null);
+ const [editDraft,setEditDraft]=useState<Record<string,string>>({});
+ async function refresh(){setLoading(true);try{setRows(await load())}catch(e){setError(e instanceof Error?e.message:"No fue posible cargar los datos.")}setLoading(false)}
+ useEffect(()=>{refresh()},[]);
+ async function submitCreate(e:FormEvent){e.preventDefault();const {error:createError}=await onCreate(draft);if(createError){setError(createError);return}setDraft({});setCreating(false);setError(null);refresh()}
+ async function submitEdit(e:FormEvent,id:string){e.preventDefault();const {error:updateError}=await onUpdate(id,editDraft);if(updateError){setError(updateError);return}setEditingId(null);setError(null);refresh()}
+ async function remove(id:string){if(!confirm("¿Eliminar este registro? No se puede deshacer.")){return}const {error:deleteError}=await onDelete(id);if(deleteError){setError(deleteError);return}refresh()}
+ function startEdit(row:any){setEditingId(row.id);const d:Record<string,string>={};fields.forEach(f=>{d[f.key]=row[f.key]??""});setEditDraft(d)}
+ return <div className="admin-table">
+  <div className="table-tools"><div><b>{title}</b>{hint&&<small className="admin-hint">{hint}</small>}</div><button className="btn primary" type="button" onClick={()=>setCreating(v=>!v)}>{creating?"Cancelar":"+ Crear nuevo"}</button></div>
+  {error&&<p className="admin-login-error">{error}</p>}
+  {creating&&<form className="admin-crud-form" onSubmit={submitCreate}>{fields.map(f=><label key={f.key}>{f.label}<input type={f.type==="number"?"number":"text"} value={draft[f.key]||""} onChange={ev=>setDraft(d=>({...d,[f.key]:ev.target.value}))}/></label>)}<div className="admin-crud-actions"><button className="btn primary" type="submit">Guardar</button></div></form>}
+  {loading?<p className="admin-empty">Cargando…</p>:rows.length===0?<p className="admin-empty">Todavía no hay registros. Crea el primero arriba.</p>:rows.map((row:any)=>{
+   const isMock=typeof row.id==="string"&&row.id.startsWith("mock-");
+   if(editingId===row.id){
+    return <form key={row.id} className="admin-crud-form admin-crud-form-inline" onSubmit={e=>submitEdit(e,row.id)}>{fields.map(f=><label key={f.key}>{f.label}<input type={f.type==="number"?"number":"text"} value={editDraft[f.key]??""} onChange={ev=>setEditDraft(d=>({...d,[f.key]:ev.target.value}))}/></label>)}<div className="admin-crud-actions"><button className="btn primary" type="submit">Guardar</button><button className="btn outline" type="button" onClick={()=>setEditingId(null)}>Cancelar</button></div></form>
+   }
+   return <div className="table-row" key={row.id}><span className="avatar">{(row.name||"?")[0]}</span><span><b>{row.name}</b><small>{row.category||row.region||row.slug||""}{isMock&&" · dato de respaldo"}</small></span><span className="status">● {row.active===false||row.is_active===false?"Inactivo":"Activo"}</span><button type="button" disabled={isMock} onClick={()=>startEdit(row)}>Editar</button><button type="button" disabled={isMock} onClick={()=>remove(row.id)}>Eliminar</button></div>
+  })}
+ </div>
+}
+
+function AdminProductsPanel(){return <CrudPanel title="Productos" hint="Cafés, métodos y accesorios del marketplace." fields={[{key:"name",label:"Nombre"},{key:"slug",label:"Slug"},{key:"category",label:"Categoría"},{key:"price",label:"Precio",type:"number"},{key:"member_price",label:"Precio miembro",type:"number"},{key:"origin_region",label:"Región de origen"},{key:"image_url",label:"URL de imagen"}]} load={getProducts} onCreate={v=>createProduct(normalizeNumbers(v,["price","member_price"])).then(r=>({error:r.error}))} onUpdate={(id,v)=>updateProduct(id,normalizeNumbers(v,["price","member_price"])).then(r=>({error:r.error}))} onDelete={id=>deleteProduct(id)}/>}
+function AdminEventsPanel(){return <CrudPanel title="Eventos" hint="Catas, talleres y charlas de la agenda." fields={[{key:"name",label:"Nombre"},{key:"slug",label:"Slug"},{key:"event_type",label:"Tipo"},{key:"event_date",label:"Fecha (AAAA-MM-DD)"},{key:"start_time",label:"Hora (HH:MM)"},{key:"price",label:"Precio",type:"number"},{key:"member_price",label:"Precio miembro",type:"number"},{key:"available_spots",label:"Cupos",type:"number"},{key:"image_url",label:"URL de imagen"}]} load={getEvents} onCreate={v=>createEvent(normalizeNumbers(v,["price","member_price","available_spots"])).then(r=>({error:r.error}))} onUpdate={(id,v)=>updateEvent(id,normalizeNumbers(v,["price","member_price","available_spots"])).then(r=>({error:r.error}))} onDelete={id=>deleteEvent(id)}/>}
+function AdminProducersPanel(){return <CrudPanel title="Productores" hint="Fincas y tostadores aliados." fields={[{key:"name",label:"Nombre"},{key:"slug",label:"Slug"},{key:"region",label:"Región"},{key:"story",label:"Historia"},{key:"image_url",label:"URL de imagen"}]} load={getProducers} onCreate={v=>createProducer(v).then(r=>({error:r.error}))} onUpdate={(id,v)=>updateProducer(id,v).then(r=>({error:r.error}))} onDelete={id=>deleteProducer(id)}/>}
+function AdminMembershipsPanel(){return <CrudPanel title="Membresías" hint="Planes Explorador, Catador y Ritual." fields={[{key:"name",label:"Nombre"},{key:"price_monthly",label:"Precio mensual",type:"number"},{key:"description",label:"Descripción"},{key:"display_order",label:"Orden",type:"number"}]} load={getMemberships} onCreate={v=>createMembership(normalizeNumbers(v,["price_monthly","display_order"])).then(r=>({error:r.error}))} onUpdate={(id,v)=>updateMembership(id,normalizeNumbers(v,["price_monthly","display_order"])).then(r=>({error:r.error}))} onDelete={id=>deleteMembership(id)}/>}
+
+function AdminReservationsPanel(){
+ const [rows,setRows]=useState<ReservationRecord[]>([]);
+ const [loading,setLoading]=useState(true);
+ const [error,setError]=useState<string|null>(null);
+ useEffect(()=>{let active=true;getReservations().then(({data,error:loadError})=>{if(!active)return;setRows(data);setError(loadError);setLoading(false)});return()=>{active=false}},[]);
+ return <div className="admin-table"><div className="table-tools"><div><b>Reservas de eventos</b><small className="admin-hint">Se crean desde el sitio público al reservar por WhatsApp.</small></div></div>{error&&<p className="admin-login-error">{error}</p>}{loading?<p className="admin-empty">Cargando…</p>:rows.length===0?<p className="admin-empty">Todavía no hay reservas registradas.</p>:rows.map(r=><div className="table-row" key={r.id}><span className="avatar">{(r.guest_name||"?")[0]}</span><span><b>{r.guest_name||"Sin nombre"}</b><small>{r.guest_phone||r.guest_email||""}</small></span><span className="status">● {r.reservation_status||"pending"}</span><span>{r.number_of_spots||1} cupo(s)</span></div>)}</div>
+}
+
+function AdminPlaceholderPanel({message}:{message:string}){return <div className="admin-table"><p className="admin-empty">{message}</p></div>}
+
+function AdminConfigPanel({onSignOut}:{onSignOut:()=>void}){return <div className="admin-table"><div className="table-row"><span className="avatar">W</span><span><b>Número de WhatsApp</b><small>Contacto público del sitio</small></span><span className="status">● +57 300 123 4567</span></div><div className="table-tools"><span/><button className="btn outline" type="button" onClick={onSignOut}>Cerrar sesión</button></div></div>}
+
+const ADMIN_MODULES:{id:string;label:string;description:string;icon:string}[]=[
+ {id:"productos",label:"Productos",description:"Cafés, métodos y accesorios del marketplace.",icon:"◒"},
+ {id:"eventos",label:"Eventos",description:"Catas, talleres y charlas de la agenda.",icon:"✦"},
+ {id:"productores",label:"Productores",description:"Fincas y tostadores aliados.",icon:"☕"},
+ {id:"membresias",label:"Membresías",description:"Planes Explorador, Catador y Ritual.",icon:"◈"},
+ {id:"reservas",label:"Reservas",description:"Reservas de eventos hechas por WhatsApp.",icon:"◉"},
+ {id:"miembros",label:"Miembros",description:"Clientes del Club (pendiente login real).",icon:"♡"},
+ {id:"pedidos",label:"Pedidos",description:"Compras del marketplace (pendiente tabla).",icon:"◇"},
+ {id:"configuracion",label:"Configuración",description:"Contacto, WhatsApp y datos de la sede.",icon:"⚙"},
+];
+
+function AdminHome({stats}:{stats:{productos:number;eventos:number;productores:number;reservas:number}}){
+ return <><p className="lead">Buenos días. Esto está pasando hoy en el Club.</p><div className="stats"><div><small>PRODUCTOS ACTIVOS</small><b>{stats.productos}</b><span>En el marketplace</span></div><div><small>EVENTOS PRÓXIMOS</small><b>{stats.eventos}</b><span>En la agenda</span></div><div><small>PRODUCTORES ALIADOS</small><b>{stats.productores}</b><span>Conectados</span></div><div><small>RESERVAS REGISTRADAS</small><b>{stats.reservas}</b><span>Vía WhatsApp</span></div></div><div className="admin-module-grid">{ADMIN_MODULES.map(m=><Link key={m.id} to={`/admin/${m.id}`} className="admin-module-card"><span className="admin-module-icon">{m.icon}</span><b>{m.label}</b><p>{m.description}</p></Link>)}</div></>
+}
+
+function Admin({sub="home",session,onSignedIn,onSignOut}:{sub?:string;session:AdminSession;onSignedIn:()=>void;onSignOut:()=>void}){
+ if(!session)return <AdminLogin onSignedIn={onSignedIn}/>;
+ const {products,events,producers}=useClubData();
+ const [reservationsCount,setReservationsCount]=useState(0);
+ useEffect(()=>{let active=true;getReservations().then(({data})=>{if(active)setReservationsCount(data.length)});return()=>{active=false}},[]);
+ const names:{[k:string]:string}={home:"Dashboard",productos:"Productos",eventos:"Eventos",productores:"Productores",membresias:"Membresías",reservas:"Reservas",miembros:"Miembros",pedidos:"Pedidos",configuracion:"Configuración"};
+ return <main className="portal admin"><aside><Link to="/" className="brand light"><span className="brandmark">C</span><span>CLUB DEL CAFÉ<small>ADMIN</small></span></Link><nav>{Object.entries(names).map(([s,n])=><Link key={s} to={`/admin${s==='home'?'':`/${s}`}`} className={sub===s?"active":""}>{n}</Link>)}</nav><Link to="/">Volver al sitio</Link></aside><div className="portal-content"><p className="eyebrow">ADMINISTRACIÓN</p><div className="admin-head"><h1>{names[sub]||"Dashboard"}</h1></div>{sub==="home"?<AdminHome stats={{productos:products.length,eventos:events.length,productores:producers.length,reservas:reservationsCount}}/>:sub==="productos"?<AdminProductsPanel/>:sub==="eventos"?<AdminEventsPanel/>:sub==="productores"?<AdminProducersPanel/>:sub==="membresias"?<AdminMembershipsPanel/>:sub==="reservas"?<AdminReservationsPanel/>:sub==="miembros"?<AdminPlaceholderPanel message="Todavía no hay usuarios reales del Club conectados: el registro público (/registro) sigue siendo una maqueta que no crea cuentas de verdad. Cuando activemos el login real de clientes, aquí aparecerá la lista."/>:sub==="pedidos"?<AdminPlaceholderPanel message="Todavía no existe una tabla de pedidos del marketplace. Hoy los productos se coordinan por WhatsApp, sin checkout dentro del sitio."/>:<AdminConfigPanel onSignOut={onSignOut}/>}</div></main>
+}
+
+export default function ClubApp(){const [path,setPath]=useState("/");const [logged,setLogged]=useState(false);const [clubData,setClubData]=useState<ClubData>({products,events,producers,plans});const [adminSession,setAdminSession]=useState<AdminSession>(null);useEffect(()=>{const sync=()=>setPath(location.pathname);sync();addEventListener("popstate",sync);return()=>removeEventListener("popstate",sync)},[]);useEffect(()=>{let active=true;Promise.all([getProducts(),getEvents(),getProducers(),getMemberships()]).then(([productRows,eventRows,producerRows,membershipRows])=>{if(active)setClubData({products:mapProducts(productRows),events:mapEvents(eventRows),producers:mapProducers(producerRows),plans:mapPlans(membershipRows)})}).catch(error=>console.warn("[Club del Café] No fue posible actualizar los datos; continúan activos los mocks.",error));return()=>{active=false}},[]);useEffect(()=>{let active=true;getInitialAdminSession().then(s=>{if(active)setAdminSession(s?{email:s.user.email||""}:null)});const unsubscribe=onAdminAuthChange(s=>{if(active)setAdminSession(s?{email:s.user.email||""}:null)});return()=>{active=false;unsubscribe()}},[]);const parts=useMemo(()=>path.split("/").filter(Boolean),[path]);let content:React.ReactNode;if(path==="/")content=<Home/>;else if(parts[0]==="marketplace")content=parts[1]?<ProductDetail slug={parts[1]}/>:<Marketplace/>;else if(parts[0]==="calendario")content=parts[1]?<EventDetail slug={parts[1]}/>:<Calendar/>;else if(parts[0]==="productores")content=parts[1]?<ProducerDetail slug={parts[1]}/>:<Producers/>;else if(path==="/membresias")content=<Memberships/>;else if(path==="/sede")content=<Venue/>;else if(path==="/login")content=<Auth kind="login" setLogged={setLogged}/>;else if(path==="/registro")content=<Auth kind="register" setLogged={setLogged}/>;else if(parts[0]==="mi-club")content=<Member sub={parts[1]||"home"} setLogged={setLogged}/>;else if(parts[0]==="admin")content=<Admin sub={parts[1]||"home"} session={adminSession} onSignedIn={()=>{}} onSignOut={()=>{signOutAdmin();go("/")}}/>;else content=<Home/>;const portal=parts[0]==="mi-club"||parts[0]==="admin";return <ClubDataContext.Provider value={clubData}><>{!portal&&<Header logged={logged} setLogged={setLogged}/>} {content} {!portal&&<Footer/>}<a className="wa-float" href={whatsapp("Hola, quiero más información sobre Club del Café.")} target="_blank" aria-label="WhatsApp">◉</a></></ClubDataContext.Provider>}
